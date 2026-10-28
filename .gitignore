@@ -1,0 +1,13 @@
+basin_mask/trash/
+basin_mask/tests/
+basin_mask/outputs/
+basin_mask/__pycache__/
+
+dam_analysis/basin_cache
+*.nc
+*.csv
+*.pyc
+__pycache__/
+.venv/
+venv/
+
