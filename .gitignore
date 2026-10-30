@@ -2,7 +2,7 @@ basin_mask/trash/
 basin_mask/tests/
 basin_mask/outputs/
 basin_mask/__pycache__/
-
+dam_analysis/dam_data
 dam_analysis/basin_cache
 *.nc
 *.csv
