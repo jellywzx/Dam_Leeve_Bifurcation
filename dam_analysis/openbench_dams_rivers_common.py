@@ -2,17 +2,20 @@
 
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 
+import h5py
 import numpy as np
 import pandas as pd
 
 OPENBENCH_OUTPUT_ROOT = Path("/share/home/dq134/wzx/openbench/openbench_1015/output")
-OUTPUT_ROOT = Path("/share/home/dq134/wzx/CoLM/dam_analysis")
+OUTPUT_ROOT = Path("/share/home/dq134/wzx/openbench/postprocess/dam_analysis/dam_data")
 DEFAULT_INPUT_SUFFIX = Path("comparisons/Diff_Plot")
 DEFAULT_DAMS = OUTPUT_ROOT / "dams_global.csv"
-DEFAULT_DAM_BUILT_BEFORE = 2005
+DEFAULT_DAM_BUILT_BEFORE = None
+FALLBACK_DAM_BUILT_BEFORE = 2005
 DEFAULT_ROUTING_FILE = Path(
     "/share/home/dq013/zhwei/colm/data/CoLMruntime/unitcatchment/"
     "grid_routing_data_06min.nc"
@@ -27,6 +30,67 @@ RIVER_DETAIL_CONFIG = {
     "none": {"minimum_uparea_km2": None, "linewidth": 0.0},
 }
 DEFAULT_RIVER_DETAIL = "fine"
+
+
+def dam_built_before_from_manifest(input_path: Path) -> tuple[int | None, Path | None]:
+    """Return the evaluation end year and manifest found above an input path."""
+    input_path = Path(input_path)
+    start = input_path if input_path.is_dir() else input_path.parent
+    manifest_path = next(
+        (
+            directory / "run_manifest.json"
+            for directory in (start, *start.parents)
+            if (directory / "run_manifest.json").is_file()
+        ),
+        None,
+    )
+    if manifest_path is None:
+        return None, None
+
+    with manifest_path.open("r", encoding="utf-8") as stream:
+        manifest = json.load(stream)
+    years = (
+        manifest.get("canonical_config", {})
+        .get("project", {})
+        .get("years")
+    )
+    if not isinstance(years, list) or not years:
+        raise ValueError(
+            f"run_manifest.json must contain a non-empty "
+            f"canonical_config.project.years list: {manifest_path}"
+        )
+    try:
+        end_year = int(years[-1])
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            f"Invalid evaluation end year {years[-1]!r} in {manifest_path}"
+        ) from exc
+    if not 1800 <= end_year <= 2030:
+        raise ValueError(
+            f"Evaluation end year must be between 1800 and 2030; "
+            f"found {end_year} in {manifest_path}"
+        )
+    return end_year, manifest_path
+
+
+def routing_numeric_1d(h5: h5py.File, name: str) -> np.ndarray:
+    """Read and decode one numeric one-dimensional routing variable."""
+    if name not in h5:
+        raise ValueError(f"Routing file is missing required variable: {name}")
+    dataset = h5[name]
+    values = np.asarray(dataset[...]).reshape(-1)
+    if values.dtype.kind not in "iuf":
+        raise ValueError(f"Routing variable {name} must be numeric.")
+    values = values.astype(float, copy=False)
+    for attribute in ("_FillValue", "missing_value"):
+        if attribute in dataset.attrs:
+            missing = float(np.asarray(dataset.attrs[attribute]).reshape(-1)[0])
+            values[values == missing] = np.nan
+    if "scale_factor" in dataset.attrs:
+        values *= float(np.asarray(dataset.attrs["scale_factor"]).reshape(-1)[0])
+    if "add_offset" in dataset.attrs:
+        values += float(np.asarray(dataset.attrs["add_offset"]).reshape(-1)[0])
+    return values
 
 
 def region_name_from_evaluation(evaluation_name: str) -> str:
